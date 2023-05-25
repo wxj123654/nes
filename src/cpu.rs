@@ -211,6 +211,18 @@ impl CPU {
         }
     }
 
+    fn compare(&mut self, mode: &AddressingMode, compare_value: u8) {
+        let addr = self.get_operand_address(&mode);
+        let value = self.mem_read(addr);
+
+        if compare_value >= value {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+        self.update_zero_and_negative_flags(compare_value.wrapping_sub(value))
+    }
+
     fn lda(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(&mode);
         let value = self.mem_read(addr);
@@ -387,6 +399,16 @@ impl CPU {
         self.status.insert(CpuFlags::CARRY);
     }
 
+    fn dec(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let mut value = self.mem_read(addr);
+
+        value = value.wrapping_sub(1);
+
+        self.mem_write(addr, value);
+        self.update_zero_and_negative_flags(value);
+    }
+
     fn stack_pop(&mut self) -> u8 {
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
         self.mem_read(STACK as u16 + self.stack_pointer as u16)
@@ -535,10 +557,10 @@ impl CPU {
             self.program_counter += 1;
             let program_counter_state = self.program_counter;
 
-            let opcode = opcodes
-                .get(&code)
-                .expect(&format!("OpCode {:x} is not recognized", code));
-            //....
+            // let opcode = opcodes
+            //     .get(&code)
+            //     .expect(&format!("OpCode {:x} is not recognized", code));
+            let opcode = opcodes.get(&code).unwrap();
 
             match code {
                 // ADC
@@ -584,6 +606,45 @@ impl CPU {
                 // BPL
                 0x10 => {
                     self.branch(!self.status.contains(CpuFlags::NEGATIVE));
+                }
+
+                // BVC
+                0x50 => {
+                    self.branch(!self.status.contains(CpuFlags::OVERFLOW));
+                }
+
+                // BVS
+                0x70 => {
+                    self.branch(self.status.contains(CpuFlags::OVERFLOW));
+                }
+
+                // CLC
+                0x18 => self.status.remove(CpuFlags::CARRY),
+
+                // CLD
+                0xD8 => self.status.remove(CpuFlags::DECIMAL_MODE),
+
+                // CLI
+                0xD8 => self.status.remove(CpuFlags::INTERRUPT_DISABLE),
+
+                // CMP
+                0xC9 | 0xC5 | 0xD5 | 0xCD | 0xDD | 0xB9 | 0xA1 | 0xB1 => {
+                    self.compare(&opcode.mode, self.register_a);
+                }
+
+                // CPX
+                0xE0 | 0xE4 | 0xEC => {
+                    self.compare(&opcode.mode, self.register_x);
+                }
+
+                // CPY
+                0xC0 | 0xC4 | 0xCC => {
+                    self.compare(&opcode.mode, self.register_y);
+                }
+
+                // DEC
+                0xC6 | 0xD6 | 0xCE | 0xDE => {
+                    self.dec(&opcode.mode);
                 }
 
                 // LDA
@@ -720,6 +781,8 @@ impl CPU {
                 // TYA
                 0x98 => self.tya(),
                 0xe8 => self.inx(),
+
+                // BRK
                 0x00 => return,
                 _ => {
                     println!("code not implement")

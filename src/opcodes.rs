@@ -112,8 +112,8 @@ lazy_static! {
 
       // CPY
       OpCode::new(0xC0, "CPY", 2, 2, AddressingMode::Immediate),
-      OpCode::new(0xE4, "CPY", 2, 3, AddressingMode::ZeroPage),
-      OpCode::new(0xEC, "CPY", 3, 4, AddressingMode::Absolute),
+      OpCode::new(0xC4, "CPY", 2, 3, AddressingMode::ZeroPage),
+      OpCode::new(0xCC, "CPY", 3, 4, AddressingMode::Absolute),
 
       //DEC
       OpCode::new(0xC6, "DEC", 2, 5, AddressingMode::ZeroPage),
