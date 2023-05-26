@@ -409,6 +409,47 @@ impl CPU {
         self.update_zero_and_negative_flags(value);
     }
 
+    fn dex(&mut self) {
+        self.register_x = self.register_x.wrapping_sub(1);
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn dey(&mut self) {
+        self.register_y = self.register_y.wrapping_sub(1);
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn eor(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        self.register_a = value ^ self.register_a;
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn inc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value: u8 = self.mem_read(addr);
+
+        let result = value.wrapping_add(1);
+        self.mem_write(addr, result);
+
+        self.update_zero_and_negative_flags(result);
+    }
+
+    fn inx(&mut self) {
+        self.register_x = self.register_x.wrapping_add(1);
+
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn iny(&mut self) {
+        self.register_y = self.register_y.wrapping_add(1);
+
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
     fn stack_pop(&mut self) -> u8 {
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
         self.mem_read(STACK as u16 + self.stack_pointer as u16)
@@ -465,6 +506,18 @@ impl CPU {
         self.update_zero_and_negative_flags(self.register_a);
     }
 
+    fn stack_push(&mut self, data: u8) {
+        self.mem_write((STACK as u16) + self.stack_pointer as u16, data);
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1)
+    }
+
+    fn stack_push_u16(&mut self, data: u16) {
+        let hi = (data >> 8) as u8;
+        let lo = (data & 0xff) as u8;
+        self.stack_push(hi);
+        self.stack_push(lo);
+    }
+
     fn set_carry_flag(&mut self) {
         self.status.insert(CpuFlags::CARRY)
     }
@@ -517,11 +570,6 @@ impl CPU {
             // self.status = self.status & 0b0111_1111;
             self.status.remove(CpuFlags::NEGATIVE);
         }
-    }
-
-    fn inx(&mut self) {
-        self.register_x = self.register_x.wrapping_add(1);
-        self.update_zero_and_negative_flags(self.register_x);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>) {
@@ -625,10 +673,10 @@ impl CPU {
                 0xD8 => self.status.remove(CpuFlags::DECIMAL_MODE),
 
                 // CLI
-                0xD8 => self.status.remove(CpuFlags::INTERRUPT_DISABLE),
+                0x58 => self.status.remove(CpuFlags::INTERRUPT_DISABLE),
 
                 // CMP
-                0xC9 | 0xC5 | 0xD5 | 0xCD | 0xDD | 0xB9 | 0xA1 | 0xB1 => {
+                0xC9 | 0xC5 | 0xD5 | 0xCD | 0xDD | 0xD9 | 0xC1 | 0xD1 => {
                     self.compare(&opcode.mode, self.register_a);
                 }
 
@@ -645,6 +693,57 @@ impl CPU {
                 // DEC
                 0xC6 | 0xD6 | 0xCE | 0xDE => {
                     self.dec(&opcode.mode);
+                }
+
+                // DEX
+                0xCA => self.dex(),
+
+                // DEY
+                0x88 => self.dey(),
+
+                // EOR
+                0x49 | 0x45 | 0x55 | 0x4D | 0x5D | 0x59 | 0x41 | 0x51 => self.eor(&opcode.mode),
+
+                // INC
+                0xE6 | 0xF6 | 0xEE | 0xFE => self.inc(&opcode.mode),
+
+                // INX
+                0xE8 => self.inx(),
+
+                // INY
+                0xC8 => self.iny(),
+
+                /* JMP Absolute */
+                0x4C => {
+                    let mem_address = self.mem_read_u16(self.program_counter);
+                    self.program_counter = mem_address;
+                }
+
+                /* JMP Indirect */
+                0x6C => {
+                    let mem_address = self.mem_read_u16(self.program_counter);
+                    // let indirect_ref = self.mem_read_u16(mem_address);
+                    //6502 bug mode with with page boundary:
+                    //  if address $3000 contains $40, $30FF contains $80, and $3100 contains $50,
+                    // the result of JMP ($30FF) will be a transfer of control to $4080 rather than $5080 as you intended
+                    // i.e. the 6502 took the low byte of the address from $30FF and the high byte from $3000
+
+                    let indirect_ref = if mem_address & 0x00FF == 0x00FF {
+                        let lo = self.mem_read(mem_address);
+                        let hi = self.mem_read(mem_address & 0xFF00);
+                        (hi as u16) << 8 | (lo as u16)
+                    } else {
+                        self.mem_read_u16(mem_address)
+                    };
+
+                    self.program_counter = indirect_ref;
+                }
+
+                /* JSR */
+                0x20 => {
+                    self.stack_push_u16(self.program_counter + 2 - 1);
+                    let target_address = self.mem_read_u16(self.program_counter);
+                    self.program_counter = target_address
                 }
 
                 // LDA
@@ -780,7 +879,7 @@ impl CPU {
 
                 // TYA
                 0x98 => self.tya(),
-                0xe8 => self.inx(),
+                // 0xE8 => self.inx(),
 
                 // BRK
                 0x00 => return,
